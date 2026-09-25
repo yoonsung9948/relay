@@ -4,7 +4,7 @@ from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, FastAPI, Request
 
-from engine.processor import GenerateRequest, build_request
+from engine.processor import GenerateRequest, build_request, GenerateResponse, build_generate_response
 from engine.resources import Resources
 
 router = APIRouter()
@@ -17,11 +17,20 @@ async def get_resources(request: Request) -> Resources:
 ResourcesDep = Annotated[Resources, Depends(get_resources)]
 
 
-@router.post("/generate")
-async def generate(body: GenerateRequest, resources: ResourcesDep):
-    internal = build_request(body, resources.tokenizer)
-    return await resources.engine.generate(internal)
+@router.post(
+    "/generate",
+    response_model=GenerateResponse,
+)
+async def generate(body: GenerateRequest, request: Request):
+    resources = await get_resources(request)
+    tokenizer = resources.tokenizer
+    engine = resources.engine
 
+    internal = build_request(body, tokenizer)
+
+    result = await engine.generate(internal)
+
+    return build_generate_response(result, tokenizer, result.generated_tokens)
 
 def create_app(
     lifespan: Callable[[FastAPI], AbstractAsyncContextManager[None]],

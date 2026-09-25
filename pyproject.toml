@@ -33,7 +33,7 @@ dev = [
 
 
 [project.scripts]
-relay = "engine.cli.cli:cli"
+relay = "engine.cli.cli:app"
 
 
 [tool.setuptools.packages.find]

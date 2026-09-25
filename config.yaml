@@ -1,0 +1,12 @@
+model:
+  repo: Qwen/Qwen3-0.6B
+  family: qwen3
+  parameter_count_b: 0.6
+
+serve:
+  host: 127.0.0.1
+  port: 8000
+
+scheduler:
+  policy: fifo
+  batch_size: 1

@@ -14,7 +14,7 @@ class Request:
     request_id: UUID = field(default_factory=uuid4)
     tokens: list[int] = field(default_factory=list)
     max_tokens: int = 128
-    generated_tokens: int = 128
+    generated_tokens: int = 0
 
 
 def build_request(
@@ -24,5 +24,4 @@ def build_request(
     return Request(
         tokens=tokenizer.encode(req.prompt),
         max_tokens=req.max_tokens,
-        generated_tokens=req.max_tokens,
     )
