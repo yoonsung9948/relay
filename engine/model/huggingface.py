@@ -16,7 +16,7 @@ class HuggingFaceModel(nn.Module):
         self.device = device
         self.model: Any = AutoModelForCausalLM.from_pretrained(
             repo,
-            torch_dtype=dtype,
+            dtype=dtype,
         )
 
         self.model.to(self.device)

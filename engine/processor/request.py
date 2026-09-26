@@ -1,6 +1,8 @@
+import asyncio
 from dataclasses import dataclass, field
 from uuid import UUID, uuid4
-from engine.processor.tokenizer import Tokenizer
+
+from engine.processor.tokenizer import Qwen3Tokenizer, Tokenizer
 from pydantic import BaseModel
 
 # API facing request
@@ -15,13 +17,4 @@ class Request:
     tokens: list[int] = field(default_factory=list)
     max_tokens: int = 128
     generated_tokens: int = 0
-
-
-def build_request(
-    req: GenerateRequest,
-    tokenizer: Tokenizer,
-) -> Request:
-    return Request(
-        tokens=tokenizer.encode(req.prompt),
-        max_tokens=req.max_tokens,
-    )
+    done_event: asyncio.Event = field(default_factory=asyncio.Event)

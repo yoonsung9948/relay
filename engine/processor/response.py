@@ -10,22 +10,22 @@ from .tokenizer import Tokenizer
 class GenerateResult:
     request_id: UUID
     token_ids: list[int]
-    generated_tokens: list[int]
+    generated_tokens: int
 
 # API-facing output
 class GenerateResponse(BaseModel):
-    request_id: UUID
+    request_id: UUID | None
     text: str
-    generated_tokens: list[int]
+    generated_tokens: int
 
 
 def build_generate_response(
     response: GenerateResult,
     tokenizer: Tokenizer,
-    generated_tokens: list[int],
+    generated_tokens: int,
 ) -> GenerateResponse:
     return GenerateResponse(
         request_id=response.request_id,
-        text=tokenizer.decode(response.generated_tokens),
+        text=tokenizer.decode(response.token_ids),
         generated_tokens=generated_tokens,
     )

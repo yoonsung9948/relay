@@ -1,4 +1,4 @@
-from .scheduler import Scheduler, FifoPolicy, SchedulingPolicy
+from .scheduler import Scheduler, RoundRobinPolicy, SchedulingPolicy
 
 
-__all__ = ["Scheduler", "FifoPolicy", "SchedulingPolicy"]
+__all__ = ["Scheduler", "RoundRobinPolicy", "SchedulingPolicy"]

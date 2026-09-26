@@ -17,7 +17,7 @@ class SchedulingPolicy(Protocol):
     ) -> list[Request]:
         ...
 
-class FifoPolicy:
+class RoundRobinPolicy:
     def select(self, pending, running, batch_size):
         batch = []
 
@@ -30,12 +30,11 @@ class FifoPolicy:
 class Scheduler:
     def __init__(
         self,
-        config: SchedulerConfig,
-        policy: SchedulingPolicy,
+        config: SchedulerConfig
     ):
         self.batch_size = config.batch_size
-        self.policy = policy
-
+        if config.policy == "round_robin":
+            self.policy = RoundRobinPolicy()
         self.pending: deque[Request] = deque()
         self.running: dict[UUID, Request] = {}
 
@@ -50,3 +49,11 @@ class Scheduler:
             self.running[req.request_id] = req
 
         return batch
+
+    def add_request(self, request: Request):
+        self.pending.append(request)
+
+    def finish_step(self, request: Request, *, finished: bool):
+        self.running.pop(request.request_id, None)
+        if not finished:
+            self.pending.append(request)
