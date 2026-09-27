@@ -12,7 +12,7 @@ import torch
 from engine.processor import Qwen3Tokenizer
 from engine.resources import Resources
 from engine.runner import Runner
-from engine.scheduler import RoundRobinPolicy, Scheduler
+from engine.scheduler import Scheduler
 
 
 def build_app(config: Config) -> FastAPI:
