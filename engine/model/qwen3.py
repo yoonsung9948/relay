@@ -1,5 +1,7 @@
 
 
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,7 +14,10 @@ from transformers.models.qwen3.modeling_qwen3 import (
 
 
 class Qwen3ForCausalLM(nn.Module):
-    def __init__(self, config):
+    def __init__(
+        self, 
+        config,
+    ):
         super().__init__()
 
         self.model = Qwen3Model(config)

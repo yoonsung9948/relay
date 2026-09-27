@@ -24,8 +24,11 @@ def build_generate_response(
     tokenizer: Tokenizer,
     generated_tokens: int,
 ) -> GenerateResponse:
+    count = response.generated_tokens
+    output_ids = response.token_ids[-count:] if count > 0 else []
+
     return GenerateResponse(
         request_id=response.request_id,
-        text=tokenizer.decode(response.token_ids),
-        generated_tokens=generated_tokens,
+        text=tokenizer.decode(output_ids),
+        generated_tokens=count,
     )

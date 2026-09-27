@@ -2,7 +2,6 @@ import typer
 import uvicorn
 
 from engine.bootstrap import build_app
-from engine.config import Config, ServeConfig, ModelConfig, SchedulerConfig
 from engine.config import load_config
 from pydantic import ValidationError
 app = typer.Typer()
@@ -15,7 +14,7 @@ def main():
 
 @app.command()
 def serve(
-    path: str = "config.yaml"
+    path: str = "./examples/configs/qwen3-custom.yaml"
 ):
 
     try:

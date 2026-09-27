@@ -25,6 +25,7 @@ class Qwen3Tokenizer:
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name
         )
+        self.eos_token_ids = frozenset([self.tokenizer.eos_token_id])
     def encode(
         self, 
         text: str,

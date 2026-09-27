@@ -4,8 +4,9 @@ from typing import Protocol
 from engine.config import SchedulerConfig
 from engine.processor import Request
 from uuid import UUID
+import logging
 
-
+logger = logging.getLogger("inference.scheduler")
 
 
 class SchedulingPolicy(Protocol):
@@ -33,8 +34,8 @@ class Scheduler:
         config: SchedulerConfig
     ):
         self.batch_size = config.batch_size
-        if config.policy == "round_robin":
-            self.policy = RoundRobinPolicy()
+        self.policy = RoundRobinPolicy()
+        
         self.pending: deque[Request] = deque()
         self.running: dict[UUID, Request] = {}
 
@@ -51,6 +52,10 @@ class Scheduler:
         return batch
 
     def add_request(self, request: Request):
+        logger.debug(
+            "scheduler_enqueue request_id=%s",
+            request.request_id,
+        )
         self.pending.append(request)
 
     def finish_step(self, request: Request, *, finished: bool):
