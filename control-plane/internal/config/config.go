@@ -1,8 +1,9 @@
 package config
 
 type ServeConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Host    string `yaml:"host"`
+	Port    int    `yaml:"port"`
+	DemoKey string `yaml:"demo_key"`
 }
 
 type ControlPlaneConfig struct {

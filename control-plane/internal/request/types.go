@@ -24,6 +24,11 @@ func BuildPendingRequest(r *http.Request) (PendingRequest, error) {
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		return PendingRequest{}, err
 	}
+
+	// limit max tokens for now
+	payload.MaxTokens = max(1, min(payload.MaxTokens, 64))
+	payload.Temperature = max(0.0, min(payload.Temperature, 1.0))
+
 	return PendingRequest{
 		Meta:    RequestMetadata{},
 		Payload: payload,

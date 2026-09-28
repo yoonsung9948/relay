@@ -49,12 +49,12 @@ func (c *HttpClient) Generate(
 	if err != nil {
 		return response.GenerateResponse{}, fmt.Errorf("failed to send HTTP request: %w", err)
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return response.GenerateResponse{}, fmt.Errorf("received non-OK HTTP status: %s", resp.Status)
 	}
 
-	defer resp.Body.Close()
 	generatedResp, err := BuildGenerateResponse(resp)
 	if err != nil {
 		return response.GenerateResponse{}, fmt.Errorf("failed to build generate response: %w", err)

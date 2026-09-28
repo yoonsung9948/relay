@@ -79,11 +79,25 @@ tmp/
 *~
 .directory
 
-# Go
+# Go (control plane)
 control-plane/bin/
 control-plane/tmp/
+control-plane/relay-linux*
+control-plane/relay-darwin*
+control-plane/relay-windows*
+control-plane/relay
+control-plane/relay.exe
+control-plane/cmd/server/server
 *.test
+*.out
 coverage.out
+go.work
+go.work.sum
+
+# Deployment configs (real ones hold demo_key; examples/ stays tracked)
+control-plane/config.yaml
+*.local.yaml
+*.pid
 
 # Frontend, if added later
 node_modules/

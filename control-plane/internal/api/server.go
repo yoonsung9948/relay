@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/yoonsung9948/relay/internal/config"
 	"github.com/yoonsung9948/relay/internal/controlplane"
@@ -20,25 +22,31 @@ func (s *Server) StartEngineHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintf(w, "Engine started successfully.")
 }
-
 func (s *Server) GenerateHandler(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+
 	pendingRequest, err := request.BuildPendingRequest(r)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error building pending request: %v", err), http.StatusBadRequest)
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	// if err := s.control.RequestManager.QueueRequest(pendingRequest); err != nil {
-	// 	http.Error(w, fmt.Sprintf("Error queuing pending request: %v", err), http.StatusInternalServerError)
-	// 	return
-	// }
 
-	// directly send the request to the engine for now
 	resp, err := s.control.Generate(r.Context(), pendingRequest)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error generating request: %v", err), http.StatusInternalServerError)
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			http.Error(w, "generation timed out", http.StatusGatewayTimeout)
+		default:
+			log.Printf("generate failed: %v", err)
+			http.Error(w, "engine unavailable", http.StatusServiceUnavailable)
+		}
 		return
 	}
-	log.Printf("Received pending request: %+v", pendingRequest)
 
 	data, err := json.Marshal(resp)
 	if err != nil {
@@ -47,11 +55,8 @@ func (s *Server) GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(data); err != nil {
-		// Log the write failure; the response is already committed.
-		// print the error for now
-		fmt.Printf("Error writing response: %v\n", err)
+		log.Printf("write response: %v", err)
 	}
 }
 
@@ -59,17 +64,31 @@ func NewServer(
 	cfg config.ServeConfig,
 	control *controlplane.ControlPlane,
 ) *Server {
+	if cfg.DemoKey == "" {
+		log.Fatal("serve_config.demo_key must be set")
+	}
+
 	server := &Server{
 		control: control,
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /generate", server.GenerateHandler)
-	mux.HandleFunc("POST /start_engine", server.StartEngineHandler)
+	generate := withDemoKeyCheck(
+		cfg.DemoKey,
+		withConcurrencyLimit(
+			make(chan struct{}, 2),
+			withTimeout(45*time.Second, server.GenerateHandler),
+		),
+	)
+	mux.HandleFunc("POST /generate", generate)
+	// mux.HandleFunc("POST /start_engine", server.StartEngineHandler)
 
 	server.httpServer = &http.Server{
-		Addr:    fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-		Handler: mux,
+		Addr:              fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      60 * time.Second,
 	}
 
 	return server
