@@ -2,6 +2,9 @@ import pytest
 import torch
 
 
+@pytest.fixture(scope="session")
+def dtype():
+    return torch.float32
 
 @pytest.fixture(scope="session")
 def device():
