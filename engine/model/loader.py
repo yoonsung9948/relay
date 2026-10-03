@@ -1,6 +1,8 @@
-import torch
-from transformers import AutoModelForCausalLM
+import os
 
+import torch
+from huggingface_hub import snapshot_download
+from safetensors.torch import load_file
 from engine.model.qwen3 import Qwen3ForCausalLM
 
 
@@ -9,20 +11,23 @@ def load_custom_qwen3(
     config,
     dtype: torch.dtype = torch.float16,
 ) -> Qwen3ForCausalLM:
-    reference = AutoModelForCausalLM.from_pretrained(
-        repo,
-        torch_dtype=dtype,
-    )
-
     model = Qwen3ForCausalLM(config)
-
     model = model.to(dtype=dtype)
 
-    result = model.load_state_dict(
-        reference.state_dict(),
-        strict=True,
+    checkpoint_dir = snapshot_download(
+        repo,
+        allow_patterns=["*.safetensors", "*.safetensors.index.json"],
     )
 
+    state_dict = {}
+    for filename in sorted(os.listdir(checkpoint_dir)):
+        if filename.endswith(".safetensors"):
+            state_dict.update(
+                load_file(os.path.join(checkpoint_dir, filename), device="cpu")
+            )
+
+    result = model.load_state_dict(state_dict, strict=True)
     print(result)
+
 
     return model

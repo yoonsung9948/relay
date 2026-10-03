@@ -6,22 +6,71 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"time"
 
 	"github.com/yoonsung9948/relay/internal/config"
 	"github.com/yoonsung9948/relay/internal/controlplane"
+	"github.com/yoonsung9948/relay/internal/controlplane/gpuprovider"
 	"github.com/yoonsung9948/relay/internal/request"
 )
 
 func (s *Server) StartEngineHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Starting engine...")
-	if err := s.control.StartEngine(r.Context()); err != nil {
-		http.Error(w, fmt.Sprintf("Error starting engine: %v", err), http.StatusInternalServerError)
+	err := s.control.StartEngine(
+		r.Context(),
+		s.control.Cfg.GPUProviderConfig,
+	)
+
+	if err != nil {
+		if errors.Is(err, gpuprovider.ErrNoCapacity) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "no_gpu_available",
+			})
+			return
+		}
+
+		http.Error(
+			w,
+			"error starting engine",
+			http.StatusInternalServerError,
+		)
 		return
 	}
-	fmt.Fprintf(w, "Engine started successfully.")
+
+	writeJSON(w, http.StatusAccepted, map[string]string{
+		"status": "starting",
+	})
 }
+func (s *Server) HealthHandler(w http.ResponseWriter, r *http.Request) {
+	status := s.control.Status()
+	data, err := json.Marshal(status)
+	if err != nil {
+		http.Error(w, "response encoding failed", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write(data); err != nil {
+		log.Printf("write response: %v", err)
+	}
+}
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		log.Printf("write response: %v", err)
+	}
+}
+
 func (s *Server) GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 
@@ -77,11 +126,21 @@ func NewServer(
 		cfg.DemoKey,
 		withConcurrencyLimit(
 			make(chan struct{}, 2),
-			withTimeout(45*time.Second, server.GenerateHandler),
+			withTimeout(cfg.RequestTimeout, server.GenerateHandler),
 		),
 	)
+	health := withTimeout(cfg.RequestTimeout, server.HealthHandler)
+	startEngine := withDemoKeyCheck(
+		cfg.DemoKey,
+		withConcurrencyLimit(
+			make(chan struct{}, 2),
+			withTimeout(cfg.RequestTimeout, server.StartEngineHandler),
+		),
+	)
+
 	mux.HandleFunc("POST /generate", generate)
-	// mux.HandleFunc("POST /start_engine", server.StartEngineHandler)
+	mux.HandleFunc("POST /start_engine", startEngine)
+	mux.HandleFunc("GET /health", health)
 
 	server.httpServer = &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),

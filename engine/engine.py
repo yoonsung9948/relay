@@ -2,6 +2,7 @@
 import asyncio
 import logging
 from typing import Set
+from enum import Enum, auto
 
 from engine.scheduler import Scheduler
 from engine.runner import Runner
@@ -9,6 +10,12 @@ from engine.processor import Request, GenerateResult
 
 logger = logging.getLogger("inference.engine")
 
+class EngineState(Enum):
+    OFFLINE = auto()
+    STARTING = auto()
+    LOADING = auto()
+    READY = auto()
+    ERROR = auto()
 
 class Engine:
     def __init__(
@@ -21,8 +28,11 @@ class Engine:
         self.runner = runner
         self.stop_token_ids = stop_ids
 
+        self.state = EngineState.OFFLINE
 
     async def generate(self, request: Request) -> GenerateResult:
+        if self.state != EngineState.READY:
+            raise RuntimeError("engine not ready")
         prompt_length = len(request.tokens)
         self.scheduler.add_request(request)
         await request.done_event.wait()
@@ -33,8 +43,12 @@ class Engine:
             generated_tokens=len(request.tokens) - prompt_length,
         )
 
+    async def health(self) -> None:
+        if self.state != EngineState.READY:
+            raise RuntimeError("engine not ready")
 
     async def run_loop(self):
+        self.state = EngineState.READY
         logger.info("engine_loop_started")
         batch = []
         try:
@@ -72,4 +86,5 @@ class Engine:
             raise
 
     async def shutdown(self):
-        ...
+        self.state = EngineState.OFFLINE
+        logger.info("engine_shutdown")

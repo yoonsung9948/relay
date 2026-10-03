@@ -103,3 +103,9 @@ control-plane/config.yaml
 node_modules/
 .next/
 dist/
+# Scratch notes, not for the repo
+TODO.md
+
+
+# configs
+control-plane/examples/*

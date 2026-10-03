@@ -11,10 +11,12 @@ from engine.config import Config
 
 @pytest.fixture
 def factories(monkeypatch):
-    tokenizer_factory = Mock(side_effect=lambda: Mock(encode=Mock(return_value=[1, 2])))
+    tokenizer_factory = Mock(side_effect=lambda *a, **k: Mock(encode=Mock(return_value=[1, 2])))
     engine_factory = Mock(
         side_effect=lambda **kwargs: Mock(
-            generate=AsyncMock(return_value={"ok": True}), shutdown=AsyncMock()
+            generate=AsyncMock(return_value={"ok": True}),
+            shutdown=AsyncMock(),
+            run_loop=AsyncMock(),
         )
     )
     monkeypatch.setattr(bootstrap, "Qwen3Tokenizer", tokenizer_factory)
@@ -29,7 +31,7 @@ def test_shared_resources_are_created_at_startup_and_closed(factories):
     engine_factory.assert_not_called()
 
     with TestClient(app) as client:
-        resources = app.state.resources
+        resources = app.state.boot.resources
         for prompt in ("first", "second"):
             response = client.post("/generate", json={"prompt": prompt, "max_tokens": 3})
             assert response.status_code == 200
@@ -44,22 +46,22 @@ def test_shared_resources_are_created_at_startup_and_closed(factories):
         resources.engine.shutdown.assert_not_awaited()
 
     resources.engine.shutdown.assert_awaited_once()
-    assert not hasattr(app.state, "resources")
+    assert app.state.boot.resources is not None  # shutdown does not clear it; see bootstrap.py
 
 
 def test_apps_have_independent_resources(factories):
     first = bootstrap.build_app(Config())
     second = bootstrap.build_app(Config())
     with TestClient(first), TestClient(second):
-        assert first.state.resources.engine is not second.state.resources.engine
-        assert first.state.resources.tokenizer is not second.state.resources.tokenizer
+        assert first.state.boot.resources.engine is not second.state.boot.resources.engine
+        assert first.state.boot.resources.tokenizer is not second.state.boot.resources.tokenizer
 
 
 def test_shutdown_runs_when_serving_raises(factories):
     app = bootstrap.build_app(Config())
     with pytest.raises(RuntimeError, match="generation failed"):
         with TestClient(app) as client:
-            engine = app.state.resources.engine
+            engine = app.state.boot.resources.engine
             engine.generate.side_effect = RuntimeError("generation failed")
             client.post("/generate", json={"prompt": "hello"})
     engine.shutdown.assert_awaited_once()
@@ -71,7 +73,7 @@ def test_cli_passes_host_and_port(monkeypatch):
     monkeypatch.setattr(cli_module, "build_app", build_app)
     monkeypatch.setattr(cli_module.uvicorn, "run", run)
     result = CliRunner().invoke(
-        cli_module.cli, ["serve", "--host", "0.0.0.0", "--port", "9000"]
+        cli_module.app, ["serve", "--host", "0.0.0.0", "--port", "9000"]
     )
     assert result.exit_code == 0, result.output
     config = build_app.call_args.args[0]

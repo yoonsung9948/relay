@@ -1,0 +1,10 @@
+# Direct runtime versions from the working development environment.
+# These are version pins, not a complete transitive lockfile.
+torch==2.14.0
+transformers==5.17.0
+safetensors==0.8.0
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+pydantic==2.13.5
+typer==0.27.2
+PyYAML==6.0.3

@@ -1,9 +1,0 @@
-serve_config:
-  host: "127.0.0.1"
-  port: 8080
-
-control_plane_config:
-  request_manager_config: {}
-
-engine_config:
-  endpoint: "http://127.0.0.1:8000/generate"

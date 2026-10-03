@@ -1,0 +1,21 @@
+# Only send engine build inputs; omit the control plane, secrets and model weights.
+**
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!README.md
+!engine/
+!engine/**
+!docker/
+!docker/requirements.txt
+!docker/engine.yaml
+**/__pycache__/**
+**/*.pyc
+**/*.pyo
+**/*.safetensors
+**/*.pt
+**/*.pth
+**/*.bin
+**/.env*
+**/*.pem
+**/*.key

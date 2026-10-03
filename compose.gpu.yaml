@@ -1,0 +1,11 @@
+# NVIDIA GPU host: docker compose -f compose.yaml -f compose.gpu.yaml up --build
+services:
+  engine:
+    platform: linux/amd64
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

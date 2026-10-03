@@ -51,13 +51,18 @@ SupportedBackends = Literal[
     "custom",
 ]
 
+class AppConfig(BaseModel):
+    cors_domains: list[str] = Field(default_factory=list)
+
 class Config(BaseModel):
     backend: SupportedBackends = "custom"
 
     model: ModelSpec = Field(
         default_factory=ModelSpec
     )
-
+    app: AppConfig = Field(
+        default_factory=AppConfig
+    )
     architecture: Qwen3Config = Field(
         default_factory=Qwen3Config
     )
