@@ -3,15 +3,23 @@ import time
 
 import torch
 
+from engine.sampler import Sampler
+
 logger = logging.getLogger("inference.runner")
 
 
 class Runner:
-    def __init__(self, model: torch.nn.Module, device: torch.device):
+    def __init__(
+        self, 
+        model: torch.nn.Module, 
+        device: torch.device,
+        sampler: Sampler,
+    ):
         self.device = device
         self.model = model.to(self.device)
         self.model.eval()
         self._first_forward = True
+        self.sampler = sampler
 
     def run(self, batch: list[list[int]]) -> list[int]:
         first_forward = self._first_forward
@@ -22,9 +30,9 @@ class Runner:
                 type(self.model).__name__, self.device, len(batch),
                 [len(tokens) for tokens in batch],
             )
-        input_ids = torch.tensor(batch, dtype=torch.int, device=self.device)
+        input_ids = torch.tensor(batch, dtype=torch.long, device=self.device)
         logits = self.model(input_ids)
-        next_tokens = torch.argmax(logits[:, -1, :], dim=-1)
+        next_tokens = self.sampler.sample(logits)
         result = next_tokens.tolist()
         if first_forward:
             logger.info(
@@ -33,3 +41,4 @@ class Runner:
             )
             self._first_forward = False
         return result
+

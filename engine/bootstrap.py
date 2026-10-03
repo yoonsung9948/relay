@@ -13,6 +13,7 @@ import torch
 from engine.processor import Qwen3Tokenizer
 from engine.resources import Resources
 from engine.runner import Runner
+from engine.sampler import GreedySampler
 from engine.scheduler import Scheduler
 import logging
 import time
@@ -103,7 +104,7 @@ async def boot_engine(
 
         app.state.boot.status = BootStatus.RUNNER_INIT
         logger.info("runner_init_begin device=%s", device)
-        runner = Runner(model, device=device)
+        runner = Runner(model, device=device, sampler=GreedySampler())
         logger.info("runner_init_complete device=%s", device)
         engine = Engine(scheduler=scheduler, runner=runner, stop_ids=tokenizer.eos_token_ids)
         loop_task = asyncio.create_task(engine.run_loop(), name="inference-engine")

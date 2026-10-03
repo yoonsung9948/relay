@@ -6,17 +6,42 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from transformers import Qwen3Config
+from engine.config import Qwen3Config
 from transformers.models.qwen3.modeling_qwen3 import (
     Qwen3RotaryEmbedding,
     apply_rotary_pos_emb,
 )
 
 
+def qwen3_06b_config() -> Qwen3Config:
+    return Qwen3Config(
+        vocab_size=151936,
+        hidden_size=1024,
+        intermediate_size=3072,
+        num_hidden_layers=28,
+        num_attention_heads=16,
+        num_key_value_heads=8,
+        head_dim=128,
+        tie_word_embeddings=True,
+    )
+
+
+def qwen3_8b_config() -> Qwen3Config:
+    return Qwen3Config(
+        vocab_size=151936,
+        hidden_size=4096,
+        intermediate_size=12288,
+        num_hidden_layers=36,
+        num_attention_heads=32,
+        num_key_value_heads=8,
+        head_dim=128,
+        tie_word_embeddings=False,
+    )
+
 class Qwen3ForCausalLM(nn.Module):
     def __init__(
         self, 
-        config,
+        config: Qwen3Config,
     ):
         super().__init__()
 
@@ -48,14 +73,17 @@ class Qwen3ForCausalLM(nn.Module):
 
 
 class Qwen3Model(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config: Qwen3Config):
         super().__init__()
 
         self.embed_tokens = nn.Embedding(
             config.vocab_size,
             config.hidden_size,
         )
-        self.rotary_emb = Qwen3RotaryEmbedding(config)
+        
+        from transformers import Qwen3Config as HFQwen3Config
+        hf_config = HFQwen3Config(**config.model_dump())
+        self.rotary_emb = Qwen3RotaryEmbedding(hf_config)
 
         self.layers = nn.ModuleList([
             Qwen3Layer(config)
@@ -99,7 +127,7 @@ class Qwen3Model(nn.Module):
 class Qwen3Layer(nn.Module):
     def __init__(
         self, 
-        config,
+        config: Qwen3Config,
     ):
         super().__init__()
 
@@ -143,7 +171,7 @@ class Qwen3Layer(nn.Module):
 class Qwen3SelfAttention(nn.Module):
     def __init__(
         self, 
-        config,
+        config: Qwen3Config,
     ):
         super().__init__()
 

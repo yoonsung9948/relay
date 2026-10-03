@@ -14,7 +14,7 @@ class HuggingFaceModel(nn.Module):
 
         self.model: Any = AutoModelForCausalLM.from_pretrained(
             repo,
-            torch_dtype=dtype,
+            dtype=dtype,
         )
 
     @torch.inference_mode()

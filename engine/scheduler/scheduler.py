@@ -18,7 +18,7 @@ class SchedulingPolicy(Protocol):
     ) -> list[Request]:
         ...
 
-class RoundRobinPolicy:
+class RoundRobinPolicy(SchedulingPolicy):
     def select(self, pending, running, batch_size):
         batch = []
 
