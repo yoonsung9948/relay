@@ -1,5 +1,6 @@
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
+
 from engine.engine import Engine
 from engine.processor import Tokenizer
 

@@ -1,0 +1,22 @@
+[Unit]
+Description=Relay inference control plane
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=relay
+Group=relay
+StateDirectory=relay
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/relay
+EnvironmentFile=/etc/relay/relay.env
+ExecStart=/usr/local/bin/relay -config /etc/relay/config.yaml
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=90s
+KillSignal=SIGTERM
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

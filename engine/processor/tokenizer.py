@@ -1,5 +1,7 @@
-from typing import Protocol, Literal, TypedDict
+from typing import Literal, Protocol, TypedDict
+
 from transformers import AutoTokenizer
+
 
 class ChatMessage(TypedDict):
     role: Literal["system", "user", "assistant"]
@@ -7,27 +9,24 @@ class ChatMessage(TypedDict):
 
 
 class Tokenizer(Protocol):
-    def encode(self, text: str) -> list[int]:
-        ...
+    def encode(self, text: str) -> list[int]: ...
 
-    def decode(self, tokens: list[int]) -> str:
-        ...
+    def decode(self, tokens: list[int]) -> str: ...
 
     def encode_chat(
         self,
         prompt: str,
         enable_thinking: bool = False,
-    ) -> list[int]:
-        ...
+    ) -> list[int]: ...
+
 
 class Qwen3Tokenizer:
-    def __init__(self, model_name: str = "Qwen/Qwen3-8B"):
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_name
-        )
+    def __init__(self, model_name: str = "Qwen/Qwen3-8B", *, revision: str | None = None):
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, revision=revision)
         self.eos_token_ids = frozenset([self.tokenizer.eos_token_id])
+
     def encode(
-        self, 
+        self,
         text: str,
         add_special_tokens: bool = False,
     ) -> list[int]:
@@ -48,7 +47,7 @@ class Qwen3Tokenizer:
         return self.tokenizer.apply_chat_template(
             [{"role": "user", "content": prompt}],
             tokenize=True,
-            add_generation_prompt=False,
+            add_generation_prompt=True,
             enable_thinking=enable_thinking,
             return_dict=False,
         )

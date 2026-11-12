@@ -1,6 +1,7 @@
+from typing import Any
+
 import torch
 from torch import Tensor, nn
-from typing import Any
 from transformers import AutoModelForCausalLM
 
 
@@ -9,12 +10,15 @@ class HuggingFaceModel(nn.Module):
         self,
         repo: str,
         dtype: torch.dtype = torch.float16,
+        *,
+        revision: str | None = None,
     ):
         super().__init__()
 
         self.model: Any = AutoModelForCausalLM.from_pretrained(
             repo,
             dtype=dtype,
+            revision=revision,
         )
 
     @torch.inference_mode()

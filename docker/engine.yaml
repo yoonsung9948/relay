@@ -3,7 +3,7 @@ backend: custom
 model:
   repo: Qwen/Qwen3-8B
   family: qwen3
-  parameter_count_b: 8
+  parameter_count_b: 8.2
 
 # Architecture matches Qwen/Qwen3-8B's actual config.json (strict state_dict load).
 architecture:

@@ -54,6 +54,7 @@ hf_cache/
 
 # Benchmark / profiler outputs
 benchmarks/results/
+observability/memory/
 profiles/
 *.nsys-rep
 *.ncu-rep

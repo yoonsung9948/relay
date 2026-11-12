@@ -1,8 +1,7 @@
 import pytest
-import torch
 
 from engine.model import HuggingFaceModel, load_custom_qwen3
-from engine.model.qwen3 import Qwen3Model, RMSNorm
+from engine.model.qwen3 import Qwen3Model
 
 
 @pytest.fixture(scope="session")

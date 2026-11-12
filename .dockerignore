@@ -9,6 +9,7 @@
 !docker/
 !docker/requirements.txt
 !docker/engine.yaml
+!docker/pool.yaml
 **/__pycache__/**
 **/*.pyc
 **/*.pyo

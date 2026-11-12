@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -15,127 +16,332 @@ import (
 	"github.com/yoonsung9948/relay/internal/response"
 )
 
+// ---------- Fake GPU provider ----------
+
 type fakeProvider struct {
-	mu          sync.Mutex
-	createFn    func(ctx context.Context, spec gpuprovider.CreateInstanceSpec) (*gpuprovider.Instance, error)
-	terminateFn func(ctx context.Context, id string, call int) error // call is 1-based per id
-	created     []gpuprovider.CreateInstanceSpec
-	termCalls   map[string]int
+	mu sync.Mutex
+
+	createFn func(
+		ctx context.Context,
+		spec gpuprovider.CreateInstanceSpec,
+	) (*gpuprovider.Instance, error)
+
+	terminateFn func(
+		ctx context.Context,
+		id string,
+		call int,
+	) error
+
+	created   []gpuprovider.CreateInstanceSpec
+	termCalls map[string]int
+	instances map[string]*gpuprovider.Instance
+	deleted   map[string]bool
+	getFn     func(context.Context, string) (*gpuprovider.Instance, error)
+	findFn    func(context.Context, string) ([]*gpuprovider.Instance, error)
 }
 
-func (f *fakeProvider) Create(ctx context.Context, s gpuprovider.CreateInstanceSpec) (*gpuprovider.Instance, error) {
+func (f *fakeProvider) Create(
+	ctx context.Context,
+	spec gpuprovider.CreateInstanceSpec,
+) (*gpuprovider.Instance, error) {
 	f.mu.Lock()
-	f.created = append(f.created, s)
+	f.created = append(f.created, spec)
 	f.mu.Unlock()
+
+	var instance *gpuprovider.Instance
+	var err error
 	if f.createFn != nil {
-		return f.createFn(ctx, s)
+		instance, err = f.createFn(ctx, spec)
+	} else {
+		instance = &gpuprovider.Instance{ID: "pod-" + spec.Name, Endpoint: "http://fake"}
 	}
-	return &gpuprovider.Instance{ID: "pod-" + s.Name, Endpoint: "http://fake"}, nil
+	if instance != nil {
+		f.mu.Lock()
+		if f.instances == nil {
+			f.instances = make(map[string]*gpuprovider.Instance)
+		}
+		copy := *instance
+		if copy.Name == "" {
+			copy.Name = spec.Name
+		}
+		f.instances[copy.ID] = &copy
+		f.mu.Unlock()
+	}
+	return instance, err
 }
 
-func (f *fakeProvider) Terminate(ctx context.Context, id string) error {
+func (f *fakeProvider) Terminate(
+	ctx context.Context,
+	id string,
+) error {
 	f.mu.Lock()
+
 	if f.termCalls == nil {
-		f.termCalls = map[string]int{}
+		f.termCalls = make(map[string]int)
 	}
+
 	f.termCalls[id]++
-	n := f.termCalls[id]
+	call := f.termCalls[id]
+
 	f.mu.Unlock()
+
+	var err error
 	if f.terminateFn != nil {
-		return f.terminateFn(ctx, id, n)
+		err = f.terminateFn(ctx, id, call)
 	}
+	if err == nil || errors.Is(err, gpuprovider.ErrNotFound) {
+		f.mu.Lock()
+		if f.deleted == nil {
+			f.deleted = make(map[string]bool)
+		}
+		f.deleted[id] = true
+		f.mu.Unlock()
+	}
+	return err
+}
+func (f *fakeProvider) Get(ctx context.Context, id string) (*gpuprovider.Instance, error) {
+	if f.getFn != nil {
+		return f.getFn(ctx, id)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.deleted[id] || f.instances[id] == nil {
+		return nil, gpuprovider.ErrNotFound
+	}
+	copy := *f.instances[id]
+	return &copy, nil
+}
+func (f *fakeProvider) FindByName(ctx context.Context, name string) ([]*gpuprovider.Instance, error) {
+	if f.findFn != nil {
+		return f.findFn(ctx, name)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var matches []*gpuprovider.Instance
+	for id, instance := range f.instances {
+		if instance.Name == name && !f.deleted[id] {
+			copy := *instance
+			matches = append(matches, &copy)
+		}
+	}
+	return matches, nil
+}
+
+func (f *fakeProvider) Stop(
+	context.Context,
+	string,
+) error {
 	return nil
 }
 
-func (f *fakeProvider) Get(context.Context, string) (*gpuprovider.Instance, error) { return nil, nil }
-func (f *fakeProvider) Stop(context.Context, string) error                         { return nil }
-func (f *fakeProvider) Start(context.Context, string) error                        { return nil }
+func (f *fakeProvider) Start(
+	context.Context,
+	string,
+) error {
+	return nil
+}
+
+// ---------- Fake engine client ----------
 
 type fakeClient struct {
-	healthFn   func(ctx context.Context) error
-	generateFn func(ctx context.Context, r request.GenerateRequest) (response.GenerateResponse, error)
-	mu         sync.Mutex
-	endpoint   string
-	genCalls   int
+	mu sync.Mutex
+
+	healthFn func(
+		ctx context.Context,
+	) error
+
+	generateFn func(
+		ctx context.Context,
+		req request.GenerateRequest,
+	) (response.GenerateResponse, error)
+
+	generateStreamFn func(
+		ctx context.Context,
+		req request.GenerateRequest,
+	) (<-chan response.StreamResponse, error)
+
+	endpoint string
+
+	genCalls    int
+	streamCalls int
+
+	lastGenerateRequest request.GenerateRequest
+	lastStreamRequest   request.GenerateRequest
 }
 
 func (c *fakeClient) Health(ctx context.Context) error {
 	if c.healthFn != nil {
 		return c.healthFn(ctx)
 	}
-	return nil // healthy immediately
+
+	return nil
 }
 
-func (c *fakeClient) Generate(ctx context.Context, r request.GenerateRequest) (response.GenerateResponse, error) {
+func (c *fakeClient) Generate(
+	ctx context.Context,
+	req request.GenerateRequest,
+) (response.GenerateResponse, error) {
 	c.mu.Lock()
 	c.genCalls++
+	c.lastGenerateRequest = req
 	c.mu.Unlock()
+
 	if c.generateFn != nil {
-		return c.generateFn(ctx, r)
+		return c.generateFn(ctx, req)
 	}
-	return response.GenerateResponse{Text: "ok"}, nil
+
+	return response.GenerateResponse{
+		Text: "ok",
+	}, nil
 }
 
-func (c *fakeClient) SetEndpoint(e string) {
+func (c *fakeClient) GenerateStream(
+	ctx context.Context,
+	req request.GenerateRequest,
+) (<-chan response.StreamResponse, error) {
 	c.mu.Lock()
-	c.endpoint = e
+	c.streamCalls++
+	c.lastStreamRequest = req
+	c.mu.Unlock()
+
+	if c.generateStreamFn != nil {
+		return c.generateStreamFn(ctx, req)
+	}
+
+	// Default: successfully established, empty stream.
+	results := make(chan response.StreamResponse)
+	close(results)
+
+	return results, nil
+}
+
+func (c *fakeClient) SetEndpoint(endpoint string) {
+	c.mu.Lock()
+	c.endpoint = endpoint
 	c.mu.Unlock()
 }
 
-func newTestCP(t *testing.T, p *fakeProvider, c *fakeClient) *ControlPlane {
+// ---------- Test helpers ----------
+
+func newTestCP(
+	t *testing.T,
+	provider *fakeProvider,
+	client *fakeClient,
+) *ControlPlane {
 	t.Helper()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	cp := NewControlPlane(ctx, config.ControlPlaneConfig{}, c)
-	cp.Provider = p
+
+	cp := NewControlPlane(
+		ctx,
+		config.ControlPlaneConfig{},
+		client,
+	)
+
+	cp.Provider = provider
+
 	return cp
 }
 
-func waitForState(t *testing.T, cp *ControlPlane, want EngineState) {
+func waitForState(
+	t *testing.T,
+	cp *ControlPlane,
+	want EngineState,
+) {
 	t.Helper()
+
 	deadline := time.Now().Add(2 * time.Second)
+
 	for time.Now().Before(deadline) {
 		if cp.getState() == want {
 			return
 		}
+
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("state = %s, want %s", cp.getState(), want)
+
+	t.Fatalf(
+		"state = %s, want %s",
+		cp.getState(),
+		want,
+	)
 }
 
-// ---------- extra helpers ----------
+func newReadyTestCP(
+	t *testing.T,
+	provider *fakeProvider,
+	client *fakeClient,
+) *ControlPlane {
+	t.Helper()
+
+	cp := newTestCP(t, provider, client)
+
+	err := cp.StartEngine(
+		context.Background(),
+		config.GPUProviderConfig{},
+	)
+	if err != nil {
+		t.Fatalf("StartEngine: %v", err)
+	}
+
+	waitForState(t, cp, StateReady)
+
+	return cp
+}
 
 func podIDs(cp *ControlPlane) []string {
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()
-	return append([]string(nil), cp.instanceIDs...)
+
+	if cp.worker == nil || cp.worker.InstanceID == "" {
+		return nil
+	}
+	return []string{cp.worker.InstanceID}
 }
 
-func terminateCalls(p *fakeProvider, id string) int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.termCalls[id]
+func terminateCalls(
+	provider *fakeProvider,
+	id string,
+) int {
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+
+	return provider.termCalls[id]
 }
 
-// scripted returns a terminateFn that replays script[id] by call number
-// (1-based). Calls past the end of the script succeed.
-func scripted(script map[string][]error) func(context.Context, string, int) error {
-	return func(_ context.Context, id string, call int) error {
-		s := script[id]
-		if call > len(s) {
+// scripted returns a terminateFn that replays errors by call number.
+// Calls past the end of the script succeed.
+
+func scripted(
+	script map[string][]error,
+) func(context.Context, string, int) error {
+	return func(
+		_ context.Context,
+		id string,
+		call int,
+	) error {
+		results := script[id]
+
+		if call > len(results) {
 			return nil
 		}
-		return s[call-1]
+
+		return results[call-1]
 	}
 }
 
 func repeatErr(err error, n int) []error {
 	out := make([]error, n)
+
 	for i := range out {
 		out[i] = err
 	}
+
 	return out
 }
+
+// ---------- Engine creation tests ----------
 
 func TestStartEngine_CreateFailures(t *testing.T) {
 	boom := errors.New("boom")
@@ -145,138 +351,161 @@ func TestStartEngine_CreateFailures(t *testing.T) {
 		createErr error
 		wantState EngineState
 	}{
-		{"no capacity returns to offline", gpuprovider.ErrNoCapacity, StateOffline},
-		{"other create error goes to error", boom, StateError},
+		{
+			name:      "no capacity returns to offline",
+			createErr: gpuprovider.ErrNoCapacity,
+			wantState: StateOffline,
+		},
+		{
+			name:      "other create error goes to error",
+			createErr: boom,
+			wantState: StateError,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			p := &fakeProvider{
-				createFn: func(context.Context, gpuprovider.CreateInstanceSpec) (*gpuprovider.Instance, error) {
+			provider := &fakeProvider{
+				createFn: func(
+					context.Context,
+					gpuprovider.CreateInstanceSpec,
+				) (*gpuprovider.Instance, error) {
 					return nil, tc.createErr
 				},
 			}
-			cp := newTestCP(t, p, &fakeClient{})
 
-			err := cp.StartEngine(context.Background(), config.GPUProviderConfig{})
+			cp := newTestCP(
+				t,
+				provider,
+				&fakeClient{},
+			)
+
+			err := cp.StartEngine(
+				context.Background(),
+				config.GPUProviderConfig{},
+			)
 
 			if !errors.Is(err, tc.createErr) {
-				t.Fatalf("err = %v, want it to wrap %v", err, tc.createErr)
+				t.Fatalf(
+					"err = %v, want it to wrap %v",
+					err,
+					tc.createErr,
+				)
 			}
+
+			if tc.wantState == StateError {
+				_ = cp.StopEngine(context.Background(), "test_reconcile")
+			}
+			waitForState(t, cp, tc.wantState)
 			if got := cp.getState(); got != tc.wantState {
-				t.Errorf("state = %s, want %s", got, tc.wantState)
+				t.Errorf(
+					"state = %s, want %s",
+					got,
+					tc.wantState,
+				)
 			}
+
 			if ids := podIDs(cp); len(ids) != 0 {
-				t.Errorf("recorded pods = %v, want none", ids)
+				t.Errorf(
+					"recorded pods = %v, want none",
+					ids,
+				)
 			}
-			// Only the error path surfaces a message in Status.
-			if tc.wantState == StateError && cp.Status().Error == "" {
-				t.Error("Status().Error is empty after a failed create")
+
+			if tc.wantState == StateError &&
+				cp.Status().Error == "" {
+				t.Error(
+					"Status().Error is empty after failed create",
+				)
 			}
 		})
 	}
 }
 
+// ---------- Engine shutdown tests ----------
+
 func TestShutdown_Outcomes(t *testing.T) {
-	boom := errors.New("boom")
-
-	tests := []struct {
-		name          string
-		script        map[string][]error // terminate results per pod, by call number
-		wantState     EngineState
-		wantErrSubstr string         // empty means Shutdown must succeed
-		wantCalls     map[string]int // exact Terminate attempts per pod
-		wantPodsLeft  int            // pods still tracked afterwards
+	transient := &gpuprovider.HTTPError{StatusCode: 503, Operation: "terminate"}
+	permanent := &gpuprovider.HTTPError{StatusCode: 401, Operation: "terminate"}
+	for _, tc := range []struct {
+		name   string
+		errors []error
+		calls  int
+		fail   bool
 	}{
-		{
-			name:         "all pods terminate cleanly",
-			script:       nil,
-			wantState:    StateOffline,
-			wantCalls:    map[string]int{"a": 1, "b": 1, "c": 1},
-			wantPodsLeft: 0,
-		},
-		{
-			name:         "transient error is retried",
-			script:       map[string][]error{"b": {boom}},
-			wantState:    StateOffline,
-			wantCalls:    map[string]int{"a": 1, "b": 2, "c": 1},
-			wantPodsLeft: 0,
-		},
-		{
-			name:         "not found counts as already gone",
-			script:       map[string][]error{"a": {gpuprovider.ErrNotFound}},
-			wantState:    StateOffline,
-			wantCalls:    map[string]int{"a": 1, "b": 1, "c": 1}, // not retried
-			wantPodsLeft: 0,
-		},
-		{
-			name:          "one stuck pod is reported, others still terminated",
-			script:        map[string][]error{"b": repeatErr(boom, 5)},
-			wantState:     StateError,
-			wantErrSubstr: "pod b",
-			wantCalls:     map[string]int{"a": 1, "b": 5, "c": 1},
-			wantPodsLeft:  3, // list is kept so a retry can find them
-		},
-	}
-
-	for _, tc := range tests {
+		{"clean", nil, 1, false},
+		{"transient retry", []error{transient}, 2, false},
+		{"already gone", []error{gpuprovider.ErrNotFound}, 1, false},
+		{"permanent retained", []error{permanent}, 1, true},
+		{"retry exhausted retained", repeatErr(transient, 5), 5, true},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// synctest fakes the clock, so the retry backoff (1s, 2s, 4s, ...)
-			// runs instantly instead of taking ~25s for the stuck-pod case.
 			synctest.Test(t, func(t *testing.T) {
-				p := &fakeProvider{terminateFn: scripted(tc.script)}
-				cp := newTestCP(t, p, &fakeClient{})
-				cp.instanceIDs = []string{"a", "b", "c"}
-
+				provider := &fakeProvider{}
+				cp := newReadyTestCP(t, provider, &fakeClient{})
+				id := podIDs(cp)[0]
+				provider.terminateFn = scripted(map[string][]error{id: tc.errors})
 				err := cp.Shutdown(context.Background())
-
-				if tc.wantErrSubstr == "" && err != nil {
-					t.Fatalf("Shutdown error: %v", err)
+				if (err != nil) != tc.fail {
+					t.Fatalf("Shutdown: %v", err)
 				}
-				if tc.wantErrSubstr != "" {
-					if err == nil || !strings.Contains(err.Error(), tc.wantErrSubstr) {
-						t.Fatalf("err = %v, want it to contain %q", err, tc.wantErrSubstr)
-					}
+				if terminateCalls(provider, id) != tc.calls {
+					t.Fatalf("calls=%d want=%d", terminateCalls(provider, id), tc.calls)
 				}
-				if got := cp.getState(); got != tc.wantState {
-					t.Errorf("state = %s, want %s", got, tc.wantState)
+				wantState, wantPods := StateOffline, 0
+				if tc.fail {
+					wantState, wantPods = StateError, 1
 				}
-				for id, want := range tc.wantCalls {
-					if got := terminateCalls(p, id); got != want {
-						t.Errorf("Terminate(%s) calls = %d, want %d", id, got, want)
-					}
-				}
-				if got := len(podIDs(cp)); got != tc.wantPodsLeft {
-					t.Errorf("pods still tracked = %d, want %d", got, tc.wantPodsLeft)
+				if cp.getState() != wantState || len(podIDs(cp)) != wantPods {
+					t.Fatalf("status=%+v pods=%v", cp.Status(), podIDs(cp))
 				}
 			})
 		})
 	}
 }
 
+// ---------- Concurrent engine startup ----------
+
 func TestStartEngine_ConcurrentCallsProvisionOnce(t *testing.T) {
 	const callers = 5
+
 	gate := make(chan struct{})
-	p := &fakeProvider{
-		createFn: func(context.Context, gpuprovider.CreateInstanceSpec) (*gpuprovider.Instance, error) {
-			<-gate // hold the winner inside Create so the others overlap with it
-			return &gpuprovider.Instance{ID: "pod-1", Endpoint: "http://fake"}, nil
+
+	provider := &fakeProvider{
+		createFn: func(
+			context.Context,
+			gpuprovider.CreateInstanceSpec,
+		) (*gpuprovider.Instance, error) {
+			<-gate
+
+			return &gpuprovider.Instance{
+				ID:       "pod-1",
+				Endpoint: "http://fake",
+			}, nil
 		},
 	}
-	cp := newTestCP(t, p, &fakeClient{})
+
+	cp := newTestCP(t, provider, &fakeClient{})
 
 	start := make(chan struct{})
+
 	var ready sync.WaitGroup
 	ready.Add(callers)
 
 	results := make(chan error, callers)
+
 	for i := 0; i < callers; i++ {
 		go func() {
 			ready.Done()
 			<-start
-			results <- cp.StartEngine(context.Background(), config.GPUProviderConfig{})
+
+			results <- cp.StartEngine(
+				context.Background(),
+				config.GPUProviderConfig{},
+			)
 		}()
 	}
+
 	ready.Wait()
 	close(start)
 
@@ -284,63 +513,322 @@ func TestStartEngine_ConcurrentCallsProvisionOnce(t *testing.T) {
 		select {
 		case err := <-results:
 			if err == nil {
-				t.Fatal("a second caller succeeded while the first was still provisioning")
+				t.Fatal(
+					"a second caller succeeded while the first was provisioning",
+				)
 			}
+
 		case <-time.After(2 * time.Second):
-			t.Fatal("timed out waiting for rejected callers")
+			t.Fatal(
+				"timed out waiting for rejected callers",
+			)
 		}
 	}
 
 	close(gate)
+
 	select {
 	case err := <-results:
 		if err != nil {
-			t.Fatalf("winning caller failed: %v", err)
+			t.Fatalf(
+				"winning caller failed: %v",
+				err,
+			)
 		}
+
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for the winning caller")
+		t.Fatal(
+			"timed out waiting for the winning caller",
+		)
 	}
+
 	waitForState(t, cp, StateReady)
 
-	p.mu.Lock()
-	created := len(p.created)
-	p.mu.Unlock()
+	provider.mu.Lock()
+	created := len(provider.created)
+	provider.mu.Unlock()
+
 	if created != 1 {
-		t.Errorf("Create called %d times, want 1", created)
+		t.Errorf(
+			"Create called %d times, want 1",
+			created,
+		)
 	}
+
 	if ids := podIDs(cp); len(ids) != 1 {
-		t.Errorf("tracked pods = %v, want exactly one", ids)
+		t.Errorf(
+			"tracked pods = %v, want exactly one",
+			ids,
+		)
 	}
 }
 
-// ---------- Workflow: hung health poll ----------
+// ---------- Engine health polling ----------
 
-func TestStartEngine_HungHealthTimesOutToError(t *testing.T) {
+func TestStartEngine_HungHealthTerminatesWorker(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var healthCalls int
-		c := &fakeClient{
+
+		client := &fakeClient{
 			healthFn: func(context.Context) error {
 				healthCalls++
 				return errors.New("not ready")
 			},
 		}
-		cp := newTestCP(t, &fakeProvider{}, c)
 
-		if err := cp.StartEngine(context.Background(), config.GPUProviderConfig{}); err != nil {
-			t.Fatalf("StartEngine: %v", err)
+		cp := newTestCP(
+			t,
+			&fakeProvider{},
+			client,
+		)
+
+		if err := cp.StartEngine(
+			context.Background(),
+			config.GPUProviderConfig{},
+		); err != nil {
+			t.Fatalf(
+				"StartEngine: %v",
+				err,
+			)
 		}
 
-		time.Sleep(16 * time.Minute) // past the 15m workflow timeout, in fake time
-		synctest.Wait()              // let the workflow goroutine finish
+		// Advance beyond the 15-minute workflow timeout.
+		time.Sleep(16 * time.Minute)
 
-		if got := cp.getState(); got != StateError {
-			t.Errorf("state = %s, want %s", got, StateError)
+		synctest.Wait()
+
+		if got := cp.getState(); got != StateOffline {
+			t.Errorf(
+				"state = %s, want %s",
+				got,
+				StateOffline,
+			)
 		}
-		if msg := cp.Status().Error; !strings.Contains(msg, "deadline exceeded") {
-			t.Errorf("Status().Error = %q, want it to mention the deadline", msg)
+
+		if msg := cp.Status().Error; !strings.Contains(
+			msg,
+			"deadline exceeded",
+		) {
+			t.Errorf(
+				"Status().Error = %q, want deadline exceeded",
+				msg,
+			)
 		}
+
 		if healthCalls < 2 {
-			t.Errorf("health polled %d times, want it to keep retrying until the timeout", healthCalls)
+			t.Errorf(
+				"health polled %d times, want retries",
+				healthCalls,
+			)
 		}
 	})
+}
+
+// ---------- Streaming generation tests ----------
+
+func TestGenerateStream_RejectsWhenEngineNotReady(t *testing.T) {
+	client := &fakeClient{}
+
+	cp := newTestCP(
+		t,
+		&fakeProvider{},
+		client,
+	)
+
+	pending := request.PendingRequest{
+		Payload: request.GenerateRequest{
+			Prompt:    "hello",
+			MaxTokens: 3,
+			Stream:    true,
+		},
+	}
+
+	stream, err := cp.GenerateStream(
+		context.Background(),
+		pending,
+	)
+
+	if err == nil {
+		t.Fatal("expected error when engine is not ready")
+	}
+
+	if stream != nil {
+		t.Fatal("expected nil stream when engine is not ready")
+	}
+
+	client.mu.Lock()
+	calls := client.streamCalls
+	client.mu.Unlock()
+
+	if calls != 0 {
+		t.Errorf(
+			"GenerateStream called %d times, want 0",
+			calls,
+		)
+	}
+}
+
+func TestGenerateStream_ForwardsResults(t *testing.T) {
+	// Simulate two generated tokens followed by an engine error.
+	//
+	// The control plane should forward the stream without
+	// consuming or modifying its contents.
+
+	streamErr := errors.New("engine stream interrupted")
+
+	want := []response.StreamResponse{
+		{
+			Chunk: response.GenerateChunk{
+				RequestID: nil,
+				Text:      "Hello",
+			},
+		},
+		{
+			Chunk: response.GenerateChunk{
+				RequestID: nil,
+				Text:      " world",
+			},
+		},
+		{
+			Err: streamErr,
+		},
+	}
+
+	client := &fakeClient{
+		generateStreamFn: func(
+			ctx context.Context,
+			req request.GenerateRequest,
+		) (<-chan response.StreamResponse, error) {
+			results := make(
+				chan response.StreamResponse,
+				len(want),
+			)
+
+			for _, result := range want {
+				results <- result
+			}
+
+			close(results)
+
+			return results, nil
+		},
+	}
+
+	cp := newReadyTestCP(
+		t,
+		&fakeProvider{},
+		client,
+	)
+
+	pending := request.PendingRequest{
+		Payload: request.GenerateRequest{
+			Prompt:    "hello",
+			MaxTokens: 3,
+			Stream:    true,
+		},
+	}
+
+	stream, err := cp.GenerateStream(
+		context.Background(),
+		pending,
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"GenerateStream: %v",
+			err,
+		)
+	}
+
+	var got []response.StreamResponse
+
+	for result := range stream {
+		got = append(got, result)
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf(
+			"stream results = %+v, want %+v",
+			got,
+			want,
+		)
+	}
+
+	client.mu.Lock()
+	calls := client.streamCalls
+	lastReq := client.lastStreamRequest
+	client.mu.Unlock()
+
+	if calls != 1 {
+		t.Errorf(
+			"GenerateStream called %d times, want 1",
+			calls,
+		)
+	}
+
+	if lastReq.Prompt != pending.Payload.Prompt {
+		t.Errorf(
+			"forwarded prompt = %q, want %q",
+			lastReq.Prompt,
+			pending.Payload.Prompt,
+		)
+	}
+
+	if lastReq.MaxTokens != pending.Payload.MaxTokens {
+		t.Errorf(
+			"forwarded max tokens = %d, want %d",
+			lastReq.MaxTokens,
+			pending.Payload.MaxTokens,
+		)
+	}
+
+	if !lastReq.Stream {
+		t.Error("stream flag was not forwarded")
+	}
+}
+
+func TestGenerateStream_PropagatesClientError(t *testing.T) {
+	boom := errors.New("engine unavailable")
+
+	client := &fakeClient{
+		generateStreamFn: func(
+			ctx context.Context,
+			req request.GenerateRequest,
+		) (<-chan response.StreamResponse, error) {
+			return nil, boom
+		},
+	}
+
+	cp := newReadyTestCP(
+		t,
+		&fakeProvider{},
+		client,
+	)
+
+	pending := request.PendingRequest{
+		Payload: request.GenerateRequest{
+			Prompt:    "hello",
+			MaxTokens: 3,
+			Stream:    true,
+		},
+	}
+
+	stream, err := cp.GenerateStream(
+		context.Background(),
+		pending,
+	)
+
+	if !errors.Is(err, boom) {
+		t.Fatalf(
+			"err = %v, want it to wrap %v",
+			err,
+			boom,
+		)
+	}
+
+	if stream != nil {
+		t.Fatal(
+			"expected nil stream when client returns an error",
+		)
+	}
 }

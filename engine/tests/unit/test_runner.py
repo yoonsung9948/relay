@@ -1,10 +1,9 @@
-import torch
 import pytest
+import torch
 
+from engine.runner import Runner
 from engine.sampler import GreedySampler
 from engine.tests.fakes.fake_model import FakeModel
-from engine.runner import Runner
-
 
 
 @pytest.mark.parametrize(
@@ -12,48 +11,29 @@ from engine.runner import Runner
     [
         (
             [[1, 2, 3]],
-            [
-                [0.1, 0.2, 5.0, 0.3],
-            ],
+            [[[5.0, 0.0, 0.0, 0.0], [0.0, 5.0, 0.0, 0.0], [0.1, 0.2, 5.0, 0.3]]],
             [2],
         ),
         (
+            [[1, 2, 3], [4, 5, 6]],
             [
-                [1, 2, 3],
-                [4, 5, 6],
+                [[5.0, 0.0, 0.0, 0.0], [0.0, 5.0, 0.0, 0.0], [0.1, 0.2, 5.0, 0.3]],
+                [[0.0, 0.0, 5.0, 0.0], [0.0, 5.0, 0.0, 0.0], [0.5, 0.1, 0.2, 3.0]],
             ],
-            [
-                [0.1, 0.2, 5.0, 0.3],
-                [0.5, 0.1, 3.0, 0.2],
-            ],
-            [2, 2],
+            [2, 3],
         ),
     ],
 )
-def test_runner_runs_and_samples(
-    batch,
-    logits,
-    expected,
-    device,
-    sampler,
-):
-    logits = torch.tensor(logits, device=device)
-
-    model = FakeModel(logits)
-    runner = Runner(model, device, sampler)
+def test_runner_samples_only_the_last_sequence_position(batch, logits, expected, device):
+    model = FakeModel(torch.tensor(logits, device=device))
+    runner = Runner(model, device, GreedySampler())
 
     actual = runner.run(batch)
 
     assert model.call_count == 1
-    assert model.last_input is not None
-
     torch.testing.assert_close(
         model.last_input,
         torch.tensor(batch, device=device),
     )
-
     assert actual == expected
-
-    
-def test_runner_output_match_shape():
-    pass
+    assert all(type(token) is int for token in actual)

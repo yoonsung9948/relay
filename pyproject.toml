@@ -19,11 +19,14 @@ dependencies = [
     "pydantic",
     "typer",
     "PyYAML",
+    "opentelemetry-api>=1.43,<2",
 ]
 
 
 [project.optional-dependencies]
+tracing = ["opentelemetry-sdk>=1.43,<2", "opentelemetry-exporter-otlp-proto-http>=1.43,<2"]
 dev = [
+    "opentelemetry-sdk>=1.43,<2",
     "pytest",
     "pytest-asyncio",
     "httpx",

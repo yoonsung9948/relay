@@ -24,21 +24,21 @@ type vastAIProvider struct {
 }
 
 func (v *vastAIProvider) Create(ctx context.Context, spec CreateInstanceSpec) (*Instance, error) {
-	return &Instance{}, nil
+	return nil, ErrUnsupported
 }
 
 func (v *vastAIProvider) Get(ctx context.Context, id string) (*Instance, error) {
-	return &Instance{}, nil
+	return nil, ErrUnsupported
 }
 
 func (v *vastAIProvider) Stop(ctx context.Context, id string) error {
-	return nil
+	return ErrUnsupported
 }
 
 func (v *vastAIProvider) Start(ctx context.Context, id string) error {
-	return nil
+	return ErrUnsupported
 }
 
 func (v *vastAIProvider) Terminate(ctx context.Context, id string) error {
-	return nil
+	return ErrUnsupported
 }

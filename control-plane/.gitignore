@@ -1,0 +1,2 @@
+# Local durable worker ownership (keep across deployments; never commit).
+/state/

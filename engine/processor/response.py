@@ -1,8 +1,14 @@
 from dataclasses import dataclass
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel
+
+from engine.metrics import GenerationMetrics
+
 from .tokenizer import Tokenizer
+
+GenerationMetadata = dict[str, str | int | float | bool | None]
 
 
 # Internal engine output
@@ -12,11 +18,25 @@ class GenerateResult:
     token_ids: list[int]
     generated_tokens: int
 
+
 # API-facing output
 class GenerateResponse(BaseModel):
     request_id: UUID | None
-    text: str
     generated_tokens: int
+    text: str
+    metrics: GenerationMetrics | None = None
+    finish_reason: Literal["eos", "length"] | None = None
+    generation: GenerationMetadata | None = None
+
+
+class StreamResponse(BaseModel):
+    type: Literal["delta", "done", "error"] = "delta"
+    request_id: UUID | None
+    text: str = ""
+    error: str | None = None
+    metrics: GenerationMetrics | None = None
+    finish_reason: Literal["eos", "length"] | None = None
+    generation: GenerationMetadata | None = None
 
 
 def build_generate_response(

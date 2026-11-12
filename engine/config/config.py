@@ -4,16 +4,35 @@ from pydantic import BaseModel, Field
 
 SchedulingPolicyName = Literal["fifo", "round_robin"]
 
+
 class ServeConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8000
 
+
 class SchedulerConfig(BaseModel):
+    max_active_requests: int = Field(default=4, gt=0)
+    max_decode_batch_size: int = Field(default=4, gt=0)
+    max_pending_requests: int = Field(default=32, gt=0)
     policy: SchedulingPolicyName = "fifo"
-    batch_size: int = Field(default=1, gt=0)
+    batch_size: int = Field(
+        default=1,
+        gt=0,
+        le=1,
+        description="Only batch_size=1 is supported until variable-length batching is implemented",
+    )
+
+
+class KVPoolConfig(BaseModel):
+    slots: int = Field(default=0, ge=0)
+    max_seq_len: int = Field(default=2048, gt=0)
+    max_bytes: int = Field(default=536870912, gt=0)
+    dynamic_max_bytes: int = Field(default=536870912, gt=0)
+
 
 class ModelSpec(BaseModel):
     repo: str = "Qwen/Qwen3-0.6B"
+    revision: str | None = None
     family: Literal["qwen3"] = "qwen3"
     parameter_count_b: float = 0.6
 
@@ -46,31 +65,25 @@ class Qwen3Config(BaseModel):
     attention_bias: bool = False
     tie_word_embeddings: bool = True
 
+
 SupportedBackends = Literal[
     "huggingface",
     "custom",
 ]
 
+
 class AppConfig(BaseModel):
     cors_domains: list[str] = Field(default_factory=list)
 
+
 class Config(BaseModel):
     backend: SupportedBackends = "custom"
+    kv_cache: KVPoolConfig = Field(default_factory=KVPoolConfig)
 
-    model: ModelSpec = Field(
-        default_factory=ModelSpec
-    )
-    app: AppConfig = Field(
-        default_factory=AppConfig
-    )
-    architecture: Qwen3Config = Field(
-        default_factory=Qwen3Config
-    )
+    model: ModelSpec = Field(default_factory=ModelSpec)
+    app: AppConfig = Field(default_factory=AppConfig)
+    architecture: Qwen3Config = Field(default_factory=Qwen3Config)
 
-    serve: ServeConfig = Field(
-        default_factory=ServeConfig
-    )
+    serve: ServeConfig = Field(default_factory=ServeConfig)
 
-    scheduler: SchedulerConfig = Field(
-        default_factory=SchedulerConfig
-    )
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)

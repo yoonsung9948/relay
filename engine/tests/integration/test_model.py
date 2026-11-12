@@ -1,7 +1,8 @@
-import torch
 import pytest
-from engine.model import load_custom_qwen3
-from engine.model.qwen3 import qwen3_06b_config, RMSNorm
+import torch
+
+from engine.model.qwen3 import RMSNorm
+
 
 @pytest.mark.gpu
 @pytest.mark.parametrize(

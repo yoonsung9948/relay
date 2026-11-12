@@ -1,0 +1,57 @@
+receivers:
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: relay-engine
+          scrape_interval: 5s
+          static_configs:
+            - targets: ["${env:ENGINE_METRICS_TARGET}"]
+        - job_name: relay-control-plane
+          scrape_interval: 5s
+          http_headers:
+            X-Demo-Key:
+              values: ["${env:RELAY_DEMO_KEY}"]
+          static_configs:
+            - targets: ["${env:CONTROL_PLANE_METRICS_TARGET}"]
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 128
+    spike_limit_mib: 32
+  batch:
+    timeout: 1s
+    send_batch_size: 128
+    send_batch_max_size: 256
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+  otlphttp/jaeger:
+    endpoint: http://jaeger:4318
+    timeout: 2s
+    sending_queue:
+      queue_size: 1024
+    retry_on_failure:
+      initial_interval: 1s
+      max_interval: 5s
+      max_elapsed_time: 15s
+  file:
+    path: /traces/spans.jsonl
+    format: json
+    append: true
+    flush_interval: 1s
+service:
+  pipelines:
+    metrics:
+      receivers: [prometheus]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/jaeger, file]

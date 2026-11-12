@@ -1,4 +1,3 @@
-from .scheduler import Scheduler, RoundRobinPolicy, SchedulingPolicy
-
+from .scheduler import RoundRobinPolicy, Scheduler, SchedulingPolicy
 
 __all__ = ["Scheduler", "RoundRobinPolicy", "SchedulingPolicy"]

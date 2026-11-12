@@ -1,0 +1,9 @@
+# Share the existing runtime pins. Install CPU-only Torch first (see ci.yml).
+# Direct pins only; this is not a complete transitive dependency lock.
+-r ../docker/requirements.txt
+
+setuptools==84.0.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
+httpx==0.28.1
+ruff==0.16.9
